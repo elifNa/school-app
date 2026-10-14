@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "Study Support",
+    "slug": "school-academic-support",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": { "backgroundColor": "#f5f6f8" },
+    "ios": { "supportsTablet": true, "bundleIdentifier": "edu.school.support" },
+    "android": { "package": "edu.school.support", "adaptiveIcon": { "backgroundColor": "#f5f6f8" } },
+    "plugins": [
+      ["expo-image-picker", { "photosPermission": "Allow Study Support to attach a photo to a question or reply." }],
+      "expo-secure-store"
+    ]
+  }
+}
