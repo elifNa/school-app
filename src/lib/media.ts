@@ -8,7 +8,7 @@ export async function uploadPhoto(photo: LocalPhoto, questionId: string, kind: '
   const file = new File(photo.uri)
   const base64 = await file.base64()
   const ext = photo.name.split('.').pop()?.toLowerCase() || 'jpg'
-  const path = `${questionId}/${kind}.${ext}`
+  const path = `${questionId}/${kind}.${Date.now()}.${ext}`
   const { error } = await supabase.storage.from('question-media').upload(path, decode(base64), {
     contentType: photo.mimeType,
     upsert: false,

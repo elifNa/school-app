@@ -1,4 +1,4 @@
--- Local migration for Study Support. This file has not been applied to any project.
+-- Baseline migration for Study Support. The connected school-app project reports this migration name at version 20261014083842; review before deploying elsewhere.
 create schema if not exists private;
 revoke all on schema private from public, anon, authenticated;
 grant usage on schema private to authenticated;

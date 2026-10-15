@@ -9,7 +9,11 @@
     "ios": { "supportsTablet": true, "bundleIdentifier": "edu.school.support" },
     "android": { "package": "edu.school.support", "adaptiveIcon": { "backgroundColor": "#f5f6f8" } },
     "plugins": [
-      ["expo-image-picker", { "photosPermission": "Allow Study Support to attach a photo to a question or reply." }],
+      ["expo-image-picker", {
+        "photosPermission": "Allow Study Support to attach a photo to a question or reply.",
+        "cameraPermission": "Allow Study Support to take a question or solution photo.",
+        "microphonePermission": false
+      }],
       "expo-secure-store"
     ]
   }
