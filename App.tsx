@@ -116,6 +116,7 @@ export default function App() {
   }
 
   async function choosePhoto(setter: (p: LocalPhoto | null) => void) {
+    if (Platform.OS === 'web') return void openPhotoPicker(setter, 'library')
     Alert.alert('Add a photo', 'Take a new picture or choose one from your library.', [
       { text: 'Take photo', onPress: () => void openPhotoPicker(setter, 'camera') },
       { text: 'Choose from library', onPress: () => void openPhotoPicker(setter, 'library') },
@@ -124,16 +125,18 @@ export default function App() {
   }
 
   async function openPhotoPicker(setter: (p: LocalPhoto | null) => void, source: 'camera' | 'library') {
-    const permission = source === 'camera'
-      ? await ImagePicker.requestCameraPermissionsAsync()
-      : await ImagePicker.requestMediaLibraryPermissionsAsync()
-    if (!permission.granted) return Alert.alert('Photo access needed', source === 'camera' ? 'Allow camera access to take a picture.' : 'Allow access to your library to attach a photo.')
+    if (Platform.OS !== 'web') {
+      const permission = source === 'camera'
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync()
+      if (!permission.granted) return Alert.alert('Photo access needed', source === 'camera' ? 'Allow camera access to take a picture.' : 'Allow access to your library to attach a photo.')
+    }
     const result = source === 'camera'
       ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.8, exif: false })
       : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8, exif: false })
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0]
-      setter({ uri: asset.uri, name: asset.fileName ?? `photo.${asset.mimeType?.split('/')[1] ?? 'jpg'}`, mimeType: asset.mimeType ?? 'image/jpeg' })
+      setter({ uri: asset.uri, name: asset.fileName ?? `photo.${asset.mimeType?.split('/')[1] ?? 'jpg'}`, mimeType: asset.mimeType ?? 'image/jpeg', file: asset.file })
     }
   }
 

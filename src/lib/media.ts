@@ -2,7 +2,7 @@ import { decode } from 'base64-arraybuffer'
 import { File } from 'expo-file-system'
 import { supabase } from './supabase'
 
-export type LocalPhoto = { uri: string; name: string; mimeType: string }
+export type LocalPhoto = { uri: string; name: string; mimeType: string; file?: Blob }
 
 export async function uploadPhoto(photo: LocalPhoto, questionId: string, kind: 'question' | 'answer') {
   const file = new File(photo.uri)

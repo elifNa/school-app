@@ -5,6 +5,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
+    "web": { "bundler": "metro", "output": "single" },
     "ios": { "supportsTablet": true, "bundleIdentifier": "edu.school.support" },
     "android": { "package": "edu.school.support", "adaptiveIcon": { "backgroundColor": "#f5f6f8" } },
     "plugins": [
