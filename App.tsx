@@ -10,8 +10,8 @@ import { isSupabaseConfigured, supabase } from './src/lib/supabase'
 import { photoUrl, uploadPhoto, type LocalPhoto } from './src/lib/media'
 import { subjects, type Question, type SolvedQuestion, type Subject } from './src/lib/academic'
 
-type Profile = { role: 'student' | 'teacher'; must_change_password: boolean }
-type Screen = 'home' | 'ask' | 'my' | 'library' | 'inbox' | 'detail'
+type Profile = { role: 'student' | 'teacher'; must_change_password: boolean; teacher_subject: Subject | null }
+type Screen = 'home' | 'ask' | 'my' | 'library' | 'inbox' | 'answered' | 'detail'
 const ink = '#18242d'
 const muted = '#71808b'
 const blue = '#246bfe'
@@ -68,7 +68,7 @@ export default function App() {
   async function loadProfile() {
     if (!session) return
     setProfileIssue(null)
-    const { data, error } = await supabase.from('profiles').select('role,must_change_password').eq('id', session.user.id).maybeSingle()
+    const { data, error } = await supabase.from('profiles').select('role,must_change_password,teacher_subject').eq('id', session.user.id).maybeSingle()
     if (error) { setProfileIssue('Your school account could not be loaded. Ask the school administrator to check your profile.'); return }
     if (!data) { setProfileIssue('Your school account has no app profile yet. Ask the school administrator to create it.'); return }
     if (!data.role) { setProfileIssue('Your account has not been assigned a student or teacher role. Ask the school administrator to assign it.'); return }
@@ -97,7 +97,7 @@ export default function App() {
     const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
     setWorking(false)
     if (error) return Alert.alert('Sign in failed', error.message)
-    const { data: p } = await supabase.from('profiles').select('role,must_change_password').eq('id', data.user.id).maybeSingle()
+    const { data: p } = await supabase.from('profiles').select('role,must_change_password,teacher_subject').eq('id', data.user.id).maybeSingle()
     if (p?.role && p.role !== roleChoice) {
       await supabase.auth.signOut()
       return Alert.alert('Choose the right sign-in type', `This account is registered as a ${p.role}.`)
@@ -163,13 +163,15 @@ export default function App() {
   }
 
   async function submitAnswer() {
-    if (!selected || !answerPhoto) return Alert.alert('Add a reply photo', 'Take a picture or choose a photo of your solution before sending it.')
+    if (!selected || !session) return
+    const isEditingOwnAnswer = 'answered_by' in selected && selected.answered_by === session.user.id
+    if (!answerPhoto && !isEditingOwnAnswer) return Alert.alert('Add a reply photo', 'Take a picture or choose a photo of your solution before sending it.')
     setWorking(true)
     try {
-      const path = await uploadPhoto(answerPhoto, selected.id, 'answer')
-      const { error } = await supabase.from('questions').update({ answer_text: answerText.trim() || 'Photo solution', answer_photo_path: path }).eq('id', selected.id)
+      const path = answerPhoto ? await uploadPhoto(answerPhoto, selected.id, 'answer') : selected.answer_photo_path
+      const { error } = await supabase.from('questions').update({ answer_text: answerText.trim() || 'Photo solution', answer_photo_path: path, answered_by: session.user.id }).eq('id', selected.id)
       if (error) throw error
-      setAnswerText(''); setAnswerPhoto(null); setScreen('inbox')
+      setAnswerText(''); setAnswerPhoto(null); setScreen(isEditingOwnAnswer ? 'answered' : 'inbox')
       await refreshQuestions()
     } catch (e) { Alert.alert('Could not send reply', e instanceof Error ? e.message : 'Please try again.') }
     finally { setWorking(false) }
@@ -182,7 +184,13 @@ export default function App() {
   if (!profile) return <Centered>{profileIssue ? <><Text style={styles.title}>Account setup needed</Text><Text style={styles.subtitle}>{profileIssue}</Text><Action title="Sign out" onPress={signOut} secondary /></> : <><ActivityIndicator color={blue} /><Text style={styles.note}>Loading your school account…</Text><Action title="Sign out" onPress={signOut} secondary /></>}</Centered>
   if (profile.must_change_password) return <PasswordScreen value={nextPassword} setValue={setNextPassword} onSubmit={changePassword} working={working} onSignOut={signOut} />
 
-  const openQuestion = (item: Question | SolvedQuestion) => { setPreviousScreen(screen); setSelected(item); setAnswerText(''); setAnswerPhoto(null); setScreen('detail') }
+  const openQuestion = (item: Question | SolvedQuestion) => {
+    setPreviousScreen(screen); setSelected(item); setAnswerPhoto(null)
+    setAnswerText('answered_by' in item && item.answered_by === session.user.id ? (item.answer_text === 'Photo solution' ? '' : item.answer_text ?? '') : '')
+    setScreen('detail')
+  }
+
+  if (profile.role === 'teacher' && !profile.teacher_subject) return <Centered><Text style={styles.title}>Subject assignment needed</Text><Text style={styles.subtitle}>Ask the school administrator to assign one subject to your teacher account before opening questions.</Text><Action title="Sign out" onPress={signOut} secondary /></Centered>
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -196,9 +204,10 @@ export default function App() {
           {screen === 'library' && <Library items={solved} filter={filter} setFilter={setFilter} onOpen={openQuestion} />}
           {screen === 'detail' && selected && <Detail item={selected} role="student" onBack={() => setScreen(previousScreen)} />}
         </> : <>
-          {screen === 'home' && <TeacherHome total={questions.length} waiting={questions.filter(q => !q.answered_at).length} onInbox={() => setScreen('inbox')} />}
+          {screen === 'home' && <TeacherHome subject={profile.teacher_subject!} total={questions.length} waiting={questions.filter(q => !q.answered_at).length} onInbox={() => setScreen('inbox')} />}
           {screen === 'inbox' && <QuestionList title="Question inbox" items={questions.filter(q => !q.answered_at)} onOpen={openQuestion} empty="New student questions will appear here." />}
-          {screen === 'detail' && selected && <><Detail item={selected} role="teacher" onBack={() => setScreen(previousScreen)} />{'answered_at' in selected && !selected.answered_at && <TeacherReply text={answerText} setText={setAnswerText} photo={answerPhoto} onPhoto={() => choosePhoto(setAnswerPhoto)} onSubmit={submitAnswer} working={working} />}</>}
+          {screen === 'answered' && <QuestionList title="My answers" items={questions.filter(q => q.answered_by === session.user.id)} onOpen={openQuestion} empty="Questions you answer will appear here." />}
+          {screen === 'detail' && selected && <><Detail item={selected} role="teacher" onBack={() => setScreen(previousScreen)} />{'answered_at' in selected && (!selected.answered_at || selected.answered_by === session.user.id) && <TeacherReply editing={Boolean(selected.answered_at)} hasExistingPhoto={Boolean(selected.answer_photo_path)} text={answerText} setText={setAnswerText} photo={answerPhoto} onPhoto={() => choosePhoto(setAnswerPhoto)} onSubmit={submitAnswer} working={working} />}</>}
         </>}
       </ScrollView>
       {screen !== 'detail' && <Nav active={screen} role={profile.role} setScreen={setScreen} />}
@@ -212,16 +221,16 @@ function SignIn(p: { email: string; setEmail: (v: string) => void; password: str
 }
 function PasswordScreen(p: { value: string; setValue: (v: string) => void; onSubmit: () => void; working: boolean; onSignOut: () => void }) { return <View style={styles.passwordWrap}><Text style={styles.eyebrow}>ONE LAST STEP</Text><Text style={styles.title}>Make this account yours.</Text><Text style={styles.subtitle}>Choose a new password before opening your learning space.</Text><Label>New password</Label><TextInput style={styles.input} value={p.value} onChangeText={p.setValue} secureTextEntry placeholder="At least 10 characters" /><Action title="Update password" onPress={p.onSubmit} working={p.working} /><Action title="Sign out" secondary onPress={p.onSignOut} /></View> }
 function StudentHome(p: { total: number; waiting: number; onAsk: () => void; onMine: () => void; onLibrary: () => void }) { return <><View style={styles.hero}><Text style={styles.heroKicker}>A QUESTION IS A GREAT START</Text><Text style={styles.heroTitle}>Curious about something?</Text><Text style={styles.heroCopy}>Send it to your teachers. We’ll work it out together.</Text><Action title="＋  Ask a question" onPress={p.onAsk} /></View><View style={styles.statsRow}><Stat value={`${p.waiting}`} label="Waiting for help" /><Stat value={`${p.total}`} label="My questions" /></View><Text style={styles.sectionTitle}>Keep learning</Text><Tile title="My questions" subtitle="Follow replies from your teachers" icon="✎" onPress={p.onMine} /><Tile title="Solved questions" subtitle="Browse answers by subject" icon="◈" onPress={p.onLibrary} /></> }
-function TeacherHome(p: { total: number; waiting: number; onInbox: () => void }) { return <><View style={[styles.hero, styles.teacherHero]}><Text style={styles.heroKicker}>TEACHER WORKSPACE</Text><Text style={styles.heroTitle}>Every question is a chance to help.</Text><Text style={styles.heroCopy}>Review questions and share clear, useful explanations.</Text><Action title="Open question inbox" onPress={p.onInbox} /></View><View style={styles.statsRow}><Stat value={`${p.waiting}`} label="Need a reply" /><Stat value={`${p.total}`} label="Total questions" /></View><Text style={styles.sectionTitle}>Answering a question</Text><Text style={styles.bodyCopy}>Open a waiting question and attach a photo of your solution. You can add a short written explanation too. Sending the reply marks it answered and adds it to the subject library.</Text></> }
+function TeacherHome(p: { subject: Subject; total: number; waiting: number; onInbox: () => void }) { return <><View style={[styles.hero, styles.teacherHero]}><Text style={styles.heroKicker}>{p.subject.toUpperCase()} TEACHER WORKSPACE</Text><Text style={styles.heroTitle}>Every question is a chance to help.</Text><Text style={styles.heroCopy}>Review {p.subject.toLowerCase()} questions and share clear, useful explanations.</Text><Action title="Open question inbox" onPress={p.onInbox} /></View><View style={styles.statsRow}><Stat value={`${p.waiting}`} label="Need a reply" /><Stat value={`${p.total}`} label={`${p.subject} questions`} /></View><Text style={styles.sectionTitle}>Answering a question</Text><Text style={styles.bodyCopy}>Open a waiting question and attach a photo of your solution. You can add a short written explanation too. You can edit your reply later from My answers.</Text></> }
 function AskForm(p: { subject: Subject; setSubject: (s: Subject) => void; text: string; setText: (s: string) => void; photo: LocalPhoto | null; onPhoto: () => void; onSubmit: () => void; working: boolean; onBack: () => void }) { return <><Header eyebrow="ASK A TEACHER" title="What are you working on?" subtitle="Choose a subject and add a clear photo of the question." onBack={p.onBack} /><Text style={styles.label}>SUBJECT</Text><SubjectPicker value={p.subject} onChange={p.setSubject} /><Text style={styles.label}>SHORT NOTE (OPTIONAL)</Text><TextInput style={[styles.input, styles.multiline]} multiline textAlignVertical="top" value={p.text} onChangeText={p.setText} placeholder="Where did you get stuck?" placeholderTextColor="#a0aab0" /><PhotoPicker photo={p.photo} onPress={p.onPhoto} label="Add a question photo (required)" /><Action title={p.working ? 'Sending…' : 'Send question'} onPress={p.onSubmit} working={p.working} /><Text style={styles.caption}>A photo is required. Your teacher can see your question and photo. Your name is hidden if it becomes a solved example.</Text></> }
-function TeacherReply(p: { text: string; setText: (s: string) => void; photo: LocalPhoto | null; onPhoto: () => void; onSubmit: () => void; working: boolean }) { return <View style={styles.replyBox}><Text style={styles.sectionTitle}>Send a photo solution</Text><TextInput style={[styles.input, styles.multiline]} multiline textAlignVertical="top" value={p.text} onChangeText={p.setText} placeholder="Add an explanation (optional)" placeholderTextColor="#a0aab0" /><PhotoPicker photo={p.photo} onPress={p.onPhoto} label="Attach a solution photo (required)" /><Action title={p.working ? 'Sending…' : 'Send photo reply & mark answered'} onPress={p.onSubmit} working={p.working} /></View> }
+function TeacherReply(p: { editing: boolean; hasExistingPhoto: boolean; text: string; setText: (s: string) => void; photo: LocalPhoto | null; onPhoto: () => void; onSubmit: () => void; working: boolean }) { return <View style={styles.replyBox}><Text style={styles.sectionTitle}>{p.editing ? 'Edit your answer' : 'Send a photo solution'}</Text><TextInput style={[styles.input, styles.multiline]} multiline textAlignVertical="top" value={p.text} onChangeText={p.setText} placeholder="Add an explanation (optional)" placeholderTextColor="#a0aab0" /><PhotoPicker photo={p.photo} onPress={p.onPhoto} label={p.hasExistingPhoto ? 'Replace solution photo (optional)' : 'Attach a solution photo (required)'} /><Action title={p.working ? 'Sending…' : p.editing ? 'Save and resend answer' : 'Send photo reply & mark answered'} onPress={p.onSubmit} working={p.working} /></View> }
 function QuestionList(p: { title: string; items: Question[]; onOpen: (q: Question) => void; empty: string }) { return <><Header eyebrow="YOUR LEARNING SPACE" title={p.title} subtitle="Open a question to read the full thread." />{p.items.length === 0 ? <Empty title="Nothing here yet" copy={p.empty} /> : p.items.map(q => <QuestionCard key={q.id} item={q} onPress={() => p.onOpen(q)} />)}</> }
 function Library(p: { items: SolvedQuestion[]; filter: Subject; setFilter: (s: Subject) => void; onOpen: (q: SolvedQuestion) => void }) { const results = useMemo(() => p.items.filter(q => q.subject === p.filter), [p.items,p.filter]); return <><Header eyebrow="SHARED LIBRARY" title="Learn from solved questions." subtitle="Real questions, helpful explanations, organized by subject." /><SubjectPicker value={p.filter} onChange={p.setFilter} />{results.length ? results.map(q => <QuestionCard key={q.id} item={q} onPress={() => p.onOpen(q)} />) : <Empty title={`No ${p.filter.toLowerCase()} answers yet`} copy="Solved questions will show up here as teachers reply." />}</> }
 function Detail(p: { item: Question | SolvedQuestion; role: 'student'|'teacher'; onBack: () => void }) { const [qUrl,setQUrl] = useState<string|null>(null); const [aUrl,setAUrl] = useState<string|null>(null); useEffect(() => { let alive=true; Promise.all([photoUrl(p.item.question_photo_path), photoUrl(p.item.answer_photo_path)]).then(([q,a]) => {if(alive){setQUrl(q);setAUrl(a)}}); return () => {alive=false} },[p.item.id]); return <><Header eyebrow={p.item.subject.toUpperCase()} title={p.item.question_text} subtitle={`${'solved_at' in p.item ? 'Solved example' : `Asked ${new Date(p.item.created_at).toLocaleDateString()}`}`} onBack={p.onBack} />{qUrl && <Image source={{uri:qUrl}} style={styles.photoPreview} resizeMode="cover" />}<View style={styles.answerStatus}><View style={[styles.dot, p.item.answer_text && styles.dotGreen]} /><Text style={styles.statusText}>{p.item.answer_text ? 'Answered' : 'Waiting for a teacher'}</Text></View>{p.item.answer_text && <View style={styles.answerCard}><Text style={styles.answerLabel}>TEACHER REPLY</Text><Text style={styles.answerText}>{p.item.answer_text}</Text>{aUrl && <Image source={{uri:aUrl}} style={styles.photoPreview} resizeMode="cover" />}</View>}</> }
 function QuestionCard(p: { item: Question | SolvedQuestion; onPress: () => void }) { const done = Boolean(p.item.answer_text); return <Pressable onPress={p.onPress} style={styles.questionCard}><View style={styles.cardTop}><Text style={styles.subjectTag}>{p.item.subject}</Text><Text style={[styles.cardStatus, done && styles.cardStatusDone]}>{done ? 'Answered' : 'Waiting'}</Text></View><Text style={styles.cardQuestion} numberOfLines={2}>{p.item.question_text}</Text><Text style={styles.cardFoot}>{new Date(p.item.created_at).toLocaleDateString()}  ·  Open details  ›</Text></Pressable> }
 function SubjectPicker(p: { value: Subject; onChange: (s: Subject) => void }) { return <View style={styles.subjectGrid}>{subjects.map(s => <Pressable key={s} onPress={() => p.onChange(s)} style={[styles.subjectButton,p.value===s&&styles.subjectActive]}><Text style={[styles.subjectText,p.value===s&&styles.subjectTextActive]}>{s}</Text></Pressable>)}</View> }
 function PhotoPicker(p: { photo: LocalPhoto | null; onPress: () => void; label: string }) { return <Pressable onPress={p.onPress} style={styles.photoPick}><Text style={styles.photoIcon}>▧</Text><View style={{flex:1}}><Text style={styles.photoTitle}>{p.photo?.name ?? p.label}</Text><Text style={styles.photoHint}>{p.photo ? 'Tap to choose a different photo' : 'Take a picture or choose from your library'}</Text></View><Text style={styles.photoAdd}>{p.photo ? 'Change' : '＋'}</Text></Pressable> }
-function Nav(p: { active: Screen; role: 'student'|'teacher'; setScreen: (s: Screen) => void }) { const items: [Screen,string,string][] = p.role==='student' ? [['home','⌂','Home'],['my','▤','My questions'],['library','◈','Solved']] : [['home','⌂','Home'],['inbox','▤','Inbox']]; return <View style={styles.nav}>{items.map(([id,icon,label]) => <Pressable key={id} onPress={() => p.setScreen(id)} style={styles.navItem}><Text style={[styles.navIcon,p.active===id&&styles.navActive]}>{icon}</Text><Text style={[styles.navLabel,p.active===id&&styles.navActive]}>{label}</Text></Pressable>)}</View> }
+function Nav(p: { active: Screen; role: 'student'|'teacher'; setScreen: (s: Screen) => void }) { const items: [Screen,string,string][] = p.role==='student' ? [['home','⌂','Home'],['my','▤','My questions'],['library','◈','Solved']] : [['home','⌂','Home'],['inbox','▤','Inbox'],['answered','✓','My answers']]; return <View style={styles.nav}>{items.map(([id,icon,label]) => <Pressable key={id} onPress={() => p.setScreen(id)} style={styles.navItem}><Text style={[styles.navIcon,p.active===id&&styles.navActive]}>{icon}</Text><Text style={[styles.navLabel,p.active===id&&styles.navActive]}>{label}</Text></Pressable>)}</View> }
 function Header(p: { eyebrow: string; title: string; subtitle: string; onBack?: () => void }) { return <View style={styles.header}>{p.onBack && <Pressable onPress={p.onBack} style={styles.back}><Text style={styles.backText}>‹  Back</Text></Pressable>}<Text style={styles.eyebrow}>{p.eyebrow}</Text><Text style={styles.pageTitle}>{p.title}</Text><Text style={styles.subtitle}>{p.subtitle}</Text></View> }
 function Label(p: { children: React.ReactNode }) { return <Text style={styles.label}>{p.children}</Text> }
 function Action(p: { title: string; onPress: () => void; secondary?: boolean; working?: boolean }) { return <Pressable disabled={p.working} onPress={p.onPress} style={[styles.action,p.secondary&&styles.actionSecondary]}>{p.working?<ActivityIndicator color={p.secondary?ink:'white'} />:<Text style={[styles.actionText,p.secondary&&styles.actionTextSecondary]}>{p.title}</Text>}</Pressable> }

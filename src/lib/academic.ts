@@ -11,8 +11,10 @@ export type Question = {
   answer_photo_path: string | null
   created_at: string
   answered_at: string | null
+  answered_by: string | null
+  answer_updated_at: string | null
 }
 
-export type SolvedQuestion = Omit<Question, 'student_id' | 'answered_at'> & {
+export type SolvedQuestion = Omit<Question, 'student_id' | 'answered_at' | 'answered_by' | 'answer_updated_at'> & {
   solved_at: string
 }
